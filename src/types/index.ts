@@ -70,6 +70,25 @@ export interface SimulationResult {
 
 export type ActiveTab = 'setup' | 'pricing' | 'traffic' | 'review';
 
+export const SCHEME_DATA_VERSION = 2;
+
+export interface SchemeData {
+  stallItems: StallItem[];
+  products: Product[];
+  discountRules: DiscountRule[];
+  selectedSceneId: string;
+  simulationHours: number;
+}
+
+export interface Scheme {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+  data: SchemeData;
+}
+
 export interface AppState {
   activeTab: ActiveTab;
   stallItems: StallItem[];
@@ -80,6 +99,9 @@ export interface AppState {
   isSimulating: boolean;
   simulationHours: number;
   selectedItemId: string | null;
+  currentSchemeId: string | null;
+  currentSchemeName: string;
+  isDirty: boolean;
 
   setActiveTab: (tab: ActiveTab) => void;
   setSelectedItemId: (id: string | null) => void;
@@ -99,4 +121,13 @@ export interface AppState {
   resetAll: () => void;
   saveToLocalStorage: () => void;
   loadFromLocalStorage: () => void;
+
+  saveScheme: (name: string) => string;
+  loadScheme: (id: string) => void;
+  deleteScheme: (id: string) => void;
+  renameScheme: (id: string, name: string) => void;
+  updateCurrentScheme: () => void;
+  getSchemeList: () => Scheme[];
+  markDirty: () => void;
+  markClean: () => void;
 }
