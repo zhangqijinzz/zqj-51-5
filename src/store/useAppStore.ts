@@ -7,6 +7,34 @@ import { scenes } from '@/data/scenes';
 
 const STORAGE_KEY = 'stall-simulator-state';
 const SCHEMES_KEY = 'stall-simulator-schemes';
+const SNAPSHOT_KEY = 'stall-simulator-snapshot';
+
+function hashContent(obj: unknown): string {
+  const str = JSON.stringify(obj);
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h = ((h << 5) - h) + ch;
+    h |= 0;
+  }
+  return h.toString(36);
+}
+
+function calculateSnapshotHash(state: {
+  stallItems: StallItem[];
+  products: Product[];
+  discountRules: DiscountRule[];
+  selectedSceneId: string | undefined;
+  simulationHours: number;
+}): string {
+  return hashContent([
+    state.stallItems,
+    state.products,
+    state.discountRules,
+    state.selectedSceneId,
+    state.simulationHours,
+  ]);
+}
 
 function loadPersistedState() {
   try {
@@ -15,6 +43,20 @@ function loadPersistedState() {
     const data = JSON.parse(raw);
     const state = data.state || data;
     const scene = scenes.find((s) => s.id === state.selectedSceneId) || scenes[0];
+
+    const currentHash = calculateSnapshotHash({
+      stallItems: state.stallItems || defaultStallItems,
+      products: state.products || defaultProducts,
+      discountRules: state.discountRules || defaultDiscountRules,
+      selectedSceneId: state.selectedSceneId,
+      simulationHours: state.simulationHours ?? 4,
+    });
+
+    const savedSnapshot = localStorage.getItem(SNAPSHOT_KEY);
+    const hasUnsavedChanges = savedSnapshot
+      ? currentHash !== savedSnapshot
+      : !!state.isDirty;
+
     return {
       stallItems: state.stallItems || defaultStallItems,
       products: state.products || defaultProducts,
@@ -23,6 +65,7 @@ function loadPersistedState() {
       simulationHours: state.simulationHours ?? 4,
       currentSchemeId: state.currentSchemeId || null,
       currentSchemeName: state.currentSchemeName || '未命名方案',
+      isDirty: hasUnsavedChanges,
     };
   } catch (e) {
     console.error('Failed to load persisted state', e);
@@ -86,6 +129,7 @@ function debouncedSave(state: AppState) {
       simulationHours: state.simulationHours,
       currentSchemeId: state.currentSchemeId,
       currentSchemeName: state.currentSchemeName,
+      isDirty: state.isDirty,
     };
     localStorage.setItem(
       STORAGE_KEY,
@@ -114,7 +158,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   selectedItemId: null,
   currentSchemeId: persisted?.currentSchemeId || null,
   currentSchemeName: persisted?.currentSchemeName || '未命名方案',
-  isDirty: false,
+  isDirty: persisted?.isDirty ?? false,
 
   setActiveTab: (tab: ActiveTab) => set({ activeTab: tab }),
   setSelectedItemId: (id: string | null) => set({ selectedItemId: id }),
@@ -186,6 +230,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   resetAll: () => {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(SNAPSHOT_KEY);
     if (saveTimeout) {
       clearTimeout(saveTimeout);
       saveTimeout = null;
@@ -216,6 +261,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       simulationHours: state.simulationHours,
       currentSchemeId: state.currentSchemeId,
       currentSchemeName: state.currentSchemeName,
+      isDirty: state.isDirty,
     };
     localStorage.setItem(
       STORAGE_KEY,
@@ -274,6 +320,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
 
     saveSchemesToStorage(schemes);
+    const snapshotHash = calculateSnapshotHash({
+      stallItems: state.stallItems,
+      products: state.products,
+      discountRules: state.discountRules,
+      selectedSceneId: state.selectedScene?.id,
+      simulationHours: state.simulationHours,
+    });
+    localStorage.setItem(SNAPSHOT_KEY, snapshotHash);
     set({ currentSchemeId: schemeId, currentSchemeName: name, isDirty: false });
     return schemeId;
   },
@@ -284,8 +338,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (!scheme) return;
 
     const migrated = migrateSchemeData(scheme);
-
     const scene = scenes.find((s) => s.id === migrated.data.selectedSceneId) || scenes[0];
+
+    const snapshotHash = calculateSnapshotHash({
+      stallItems: migrated.data.stallItems,
+      products: migrated.data.products,
+      discountRules: migrated.data.discountRules,
+      selectedSceneId: migrated.data.selectedSceneId,
+      simulationHours: migrated.data.simulationHours,
+    });
+    localStorage.setItem(SNAPSHOT_KEY, snapshotHash);
 
     set({
       stallItems: migrated.data.stallItems,
@@ -318,6 +380,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const state = get();
     if (state.currentSchemeId === id) {
+      localStorage.removeItem(SNAPSHOT_KEY);
       set({ currentSchemeId: null, currentSchemeName: '未命名方案', isDirty: false });
     }
   },
@@ -360,6 +423,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
     };
 
     saveSchemesToStorage(schemes);
+
+    const snapshotHash = calculateSnapshotHash({
+      stallItems: state.stallItems,
+      products: state.products,
+      discountRules: state.discountRules,
+      selectedSceneId: state.selectedScene?.id,
+      simulationHours: state.simulationHours,
+    });
+    localStorage.setItem(SNAPSHOT_KEY, snapshotHash);
     set({ isDirty: false });
   },
 
@@ -369,7 +441,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   markDirty: () => set({ isDirty: true }),
 
-  markClean: () => set({ isDirty: false }),
+  markClean: () => {
+    const state = get();
+    const snapshotHash = calculateSnapshotHash({
+      stallItems: state.stallItems,
+      products: state.products,
+      discountRules: state.discountRules,
+      selectedSceneId: state.selectedScene?.id,
+      simulationHours: state.simulationHours,
+    });
+    localStorage.setItem(SNAPSHOT_KEY, snapshotHash);
+    set({ isDirty: false });
+  },
 }));
 
 useAppStore.subscribe((state) => {
@@ -390,6 +473,7 @@ if (typeof window !== 'undefined') {
       simulationHours: state.simulationHours,
       currentSchemeId: state.currentSchemeId,
       currentSchemeName: state.currentSchemeName,
+      isDirty: state.isDirty,
     };
     localStorage.setItem(
       STORAGE_KEY,
